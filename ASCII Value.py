@@ -11,7 +11,6 @@ elif a >= 97 and a <= 122:
     print(ch, "is a lowercase letter")
 elif a >= 48 and a <= 57:
     print(ch, "is a digit")
-
 else:
     print("Please enter a single character")
 
