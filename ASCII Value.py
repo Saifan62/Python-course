@@ -1,16 +1,9 @@
-ch= input("Enter a character:")
-
-if len(ch) == 1:
-    a=ord(ch)
-    print("The ASCII value of", ch, "is", a)
-    print("Hexadecimal value of", ch, "is", hex(a), "and binary value is", bin(a))
-    print("Octal value of", ch, "is", oct(a))
-if a >= 65 and a <= 90:
-    print(ch, "is an uppercase letter")
-elif a >= 97 and a <= 122:
-    print(ch, "is a lowercase letter")
-elif a >= 48 and a <= 57:
-    print(ch, "is a digit")
+name=input("Please enter a character: ")
+if len(name) == 1:
+    ascii_value = ord(name)
+    print(f"The ASCII value of '{name}' is {ascii_value}.")
+elif len(name) > 1:
+    print("Please enter only a single character.")
+    
 else:
-    print("Please enter a single character")
-
+    print("Invalid input. Please enter a single character.")
