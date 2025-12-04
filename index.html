@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>All-in-One Geometry Dash</title>
+<style>
+  :root {
+    --bg:#070812; --text:#e8f0ff; --accent:#00ffd5;
+  }
+  html,body { height:100%; margin:0; background:linear-gradient(180deg,#05060a,#0b1020); color:var(--text); font-family:Inter, system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  #ui { position:fixed; left:12px; top:12px; z-index:50; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button, select, input { background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.06); color:var(--text); padding:8px 10px; border-radius:8px; cursor:pointer; }
+  button:hover { filter:brightness(1.1); }
+  #editorPanel { position:fixed; right:12px; top:12px; z-index:50; background:rgba(0,0,0,0.35); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.04); max-width:260px; }
+  canvas { display:block; width:100%; height:100vh; }
+  .small { padding:6px 8px; font-size:13px; }
+  label { font-size:13px; margin-right:6px; color:#cfe9ff; }
+  #hint { position:fixed; left:50%; transform:translateX(-50%); bottom:12px; background:rgba(0,0,0,0.3); padding:8px 12px; border-radius:8px; font-size:13px; color:#cfe9ff; }
+  #levelList { width:100%; max-height:160px; overflow:auto; display:block; margin-top:6px; background:rgba(255,255,255,0.02); padding:6px; border-radius:6px; }
+  .item { padding:6px; border-radius:6px; margin-bottom:6px; border:1px dashed rgba(255,255,255,0.04); cursor:pointer;}
+  .item:hover{ background:rgba(255,255,255,0.02); }
+  footer { position:fixed; right:12px; bottom:12px; opacity:0.7; font-size:12px; }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <button id="playBtn">Play</button>
+  <button id="pauseBtn">Pause</button>
+  <button id="resetBtn">Reset</button>
+  <button id="loadMusicBtn">Load Music</button>
+  <select id="modeSelect" class="small">
+    <option value="cube">Cube</option>
+    <option value="wave">Wave</option>
+    <option value="ship">Ship</option>
+  </select>
+  <label>Difficulty
+    <input id="speedRange" type="range" min="4" max="20" value="10" />
+  </label>
+  <button id="toggleEditor">E: Editor</button>
+  <button id="exportLevel">Export</button>
+  <button id="importLevel">Import</button>
+  <button id="clearSaved">Clear Saves</button>
+</div>
+
+<div id="editorPanel" style="display:none;">
+  <div><strong>Editor</strong></div>
+  <div style="margin-top:8px;">
+    <label>Brush:</label>
+    <select id="brushType">
+      <option value="obstacle">Obstacle</option>
+      <option value="portal_fast">Portal: Fast</option>
+      <option value="portal_slow">Portal: Slow</option>
+      <option value="portal_wave">Portal: Wave</option>
+      <option value="jumppad">Jump Pad</option>
+      <option value="spike">Spike</option>
+      <option value="saw">Saw</option>
+    </select>
+  </div>
+  <div style="margin-top:8px;">
+    <label>Place mode:</label>
+    <select id="placeMode">
+      <option value="click">Click</option>
+      <option value="drag">Drag</option>
+    </select>
+  </div>
+  <div style="margin-top:8px;">
+    <button id="saveLevel" class="small">Save Level</button>
+    <button id="loadLevel" class="small">Load Level</button>
+    <button id="clearLevel" class="small">Clear Level</button>
+  </div>
+  <div style="margin-top:8px;"><strong>Saved Levels</strong></div>
+  <div id="levelList"></div>
+</div>
+
+<canvas id="game"></canvas>
+<div id="hint">Space / Tap to play. E to toggle editor. Editor: click to place.</div>
+<footer>All-in-one Geometry Dash — single-file</footer>
+
+<script>
+/*  All-in-one Geometry Dash — single file
+    Features:
+    - Modes: cube / wave / ship
+    - Parallax backgrounds
+    - Portals: fast/slow/wave
+    - Jump pads, spikes, saw (rotating)
+    - Particle explosions, trails, glow
+    - Music + beat-sync using WebAudio (Load music button)
+    - Editor mode (E) with save/load to localStorage, export/import JSON
+    - Touch controls
+    - UI buttons for play/pause/reset
+*/
+
+/* -------------------- Setup -------------------- */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d', { alpha:false });
+let W = canvas.width = innerWidth;
+let H = canvas.height = innerHeight;
+
+window.addEventListener('resize', ()=>{ W=canvas.width=innerWidth; H=canvas.height=innerHeight; });
+
+let running = false;
+let frame = 0;
+let baseSpeed = Number(document.getElementById('speedRange').value);
+let speed = baseSpeed;
+let score = 0;
+let mode = document.getElementById('modeSelect').value;
+let gravity = 1.2;
+let beatPulse = 0;
+
+/* -------------------- Audio / Beat Detection -------------------- */
+let audioCtx = null;
+let audio = new Audio();
+audio.crossOrigin = "anonymous";
+let analyser, sourceNode, freqData;
+
+document.getElementById('loadMusicBtn').addEventListener('click', async ()=>{
+  // Ask user for URL or file
+  let url = prompt("Enter audio URL, or cancel to pick a local file:");
+  if(url){
+    try {
+      audio.src = url;
+      audio.loop = true;
+      await audio.play().catch(()=>{}); // may require user gesture
+      initAudio();
+    } catch(e){ alert('Failed to load audio URL'); console.error(e); }
+  } else {
+    // open file picker
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if(!file) return;
+      audio.src = URL.createObjectURL(file);
+      audio.loop = true;
+      try { await audio.play(); initAudio(); } catch(e){ alert('Playback failed — interact with page then try again.'); }
+    };
+    input.click();
+  }
+});
+
+function initAudio(){
+  if(!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    sourceNode = audioCtx.createMediaElementSource(audio);
+    sourceNode.connect(analyser);
+    analyser.connect(audioCtx.destination);
+  }
+}
+
+/* -------------------- Player -------------------- */
+const player = {
+  x: 160, y: H - 150, size: 48, dy: 0, trail: [],
+  rotation:0, // for ship
+  grounded:true
+};
+
+function resetPlayer(){
+  player.x = 160; player.size = 48; player.y = H - 150; player.dy = 0; player.trail = []; player.rotation=0; player.grounded=true;
+  score = 0; frame=0; speed = baseSpeed;
+}
+
+/* -------------------- World objects -------------------- */
+let obstacles = []; // {x,y,w,h,type,color}
+let portals = [];   // {x,y,w,h,type,color}
+let jumpPads = [];  // {x,y,w,h,color}
+let spikes = [];    // {x,y,w,h}
+let saws = [];      // {x,y, r, angle, speed}
+
+/* helper colors */
+const palette = { neonA:"#00ffc8", neonB:"#00baff", accent:"#ff6b6b" };
+
+/* -------------------- Editor -------------------- */
+let editorMode = false;
+const editorPanel = document.getElementById('editorPanel');
+document.getElementById('toggleEditor').addEventListener('click', toggleEditor);
+document.addEventListener('keydown', e => { if(e.key.toLowerCase()==='e'){ toggleEditor(); }});
+function toggleEditor(){ editorMode = !editorMode; editorPanel.style.display = editorMode ? 'block' : 'none'; document.getElementById('hint').textContent = editorMode ? 'Editor: click to place. Press E to exit.' : 'Space / Tap to play. E to toggle editor.'; }
+
+/* Editor brush */
+const brushType = document.getElementById('brushType');
+const placeMode = document.getElementById('placeMode');
+let placing = false;
+let dragStart = null;
+
+/* Editor interactions */
+canvas.addEventListener('pointerdown', (ev)=>{
+  if(editorMode){
+    const rect = canvas.getBoundingClientRect();
+    const cx = ev.clientX - rect.left; const cy = ev.clientY - rect.top;
+    const brush = brushType.value;
+    if(placeMode.value === 'click'){
+      placeBrush(brush, cx, cy);
+    } else {
+      placing = true; dragStart = {x:cx,y:cy};
+    }
+  } else {
+    // gameplay input
+    if(mode === 'cube'){
+      if(player.y + player.size >= H - 10) player.dy = -24;
+    } else if(mode === 'wave'){
+      wavePressed = true;
+    } else if(mode === 'ship'){
+      shipPressed = true;
+    }
+  }
+});
+canvas.addEventListener('pointermove', (ev)=>{
+  if(editorMode && placing){
+    const rect = canvas.getBoundingClientRect();
+    const cx = ev.clientX - rect.left; const cy = ev.clientY - rect.top;
+    drawPreview(dragStart.x, dragStart.y, cx-dragStart.x, cy-dragStart.y, brushType.value);
+  }
+});
+canvas.addEventListener('pointerup', (ev)=>{
+  if(editorMode && placing){
+    const rect = canvas.getBoundingClientRect();
+    const cx = ev.clientX - rect.left; const cy = ev.clientY - rect.top;
+    placeBrush(brushType.value, dragStart.x, dragStart.y, cx-dragStart.x, cy-dragStart.y);
+    placing = false; dragStart = null;
+  } else {
+    // release gameplay
+    wavePressed = false; shipPressed = false;
+  }
+});
+
+/* place brush implementation */
+function placeBrush(brush, x, y, w=60, h=60){
+  if(brush === 'obstacle'){
+    const hh = Math.abs(h) > 10 ? Math.abs(h) : 60;
+    obstacles.push({ x:x, y: H - hh, w: Math.abs(w) > 10 ? Math.abs(w) : 50, h: hh, type:'block', color: randomColor() });
+  } else if(brush.startsWith('portal')){
+    let t = brush.split('_')[1] || brush;
+    portals.push({ x:x, y:H-160, w:40, h:120, type:t, color: t==='fast'? '#00ff88' : t==='slow' ? '#ffaa00' : '#00d5ff' });
+  } else if(brush === 'jumppad'){
+    jumpPads.push({ x:x, y:H-40, w:70, h:20, color:'#00ff33' });
+  } else if(brush === 'spike'){
+    spikes.push({ x:x, y:H-40, w:50, h:40 });
+  } else if(brush === 'saw'){
+    saws.push({ x:x, y:H-80, r:36, angle:0, speed: 0.12 });
+  }
+}
+
+/* draw preview for drag placement (editor) */
+function drawPreview(x,y,w,h,brush){
+  // no-op here; preview is drawn inside render loop if editor and dragging
+  previewRect = { x,y,w,h,brush };
+}
+let previewRect = null;
+
+/* Save/Load levels */
+function saveLevel(name){
+  const level = { obstacles, portals, jumpPads, spikes, saws, meta:{ name: name || ('Level '+Date.now()) } };
+  const s = localStorage.getItem('gd_levels') || '[]';
+  const arr = JSON.parse(s);
+  arr.push(level);
+  localStorage.setItem('gd_levels', JSON.stringify(arr));
+  refreshLevelList();
+}
+function loadLevelObj(idx){
+  const s = JSON.parse(localStorage.getItem('gd_levels')||'[]');
+  const lv = s[idx];
+  if(lv){
+    obstacles = lv.obstacles || [];
+    portals = lv.portals || [];
+    jumpPads = lv.jumpPads || [];
+    spikes = lv.spikes || [];
+    saws = lv.saws || [];
+  }
+}
+function refreshLevelList(){
+  const wrap = document.getElementById('levelList'); wrap.innerHTML = '';
+  const arr = JSON.parse(localStorage.getItem('gd_levels')||'[]');
+  arr.forEach((lv,i)=>{
+    const el = document.createElement('div'); el.className='item';
+    el.textContent = lv.meta?.name || 'Level '+(i+1);
+    el.onclick = ()=>{ if(confirm('Load level "'+(lv.meta?.name||'')+'"?')){ loadLevelObj(i); toggleEditor(); } };
+    wrap.appendChild(el);
+  });
+}
+refreshLevelList();
+
+/* Editor buttons */
+document.getElementById('saveLevel').addEventListener('click', ()=>{ const n=prompt('Level name:','My Level'); if(n!==null) saveLevel(n);});
+document.getElementById('loadLevel').addEventListener('click', ()=>{ refreshLevelList(); alert('Click a saved level on the right to load it.'); });
+document.getElementById('clearLevel').addEventListener('click', ()=>{ if(confirm('Clear current editor objects?')){ obstacles=[]; portals=[]; jumpPads=[]; spikes=[]; saws=[]; }});
+document.getElementById('clearSaved').addEventListener('click', ()=>{ if(confirm('Clear all saved levels?')){ localStorage.removeItem('gd_levels'); refreshLevelList(); }});
+document.getElementById('exportLevel').addEventListener('click', ()=>{ const data = JSON.stringify({ obstacles, portals, jumpPads, spikes, saws }); prompt('Copy level JSON:', data); });
+document.getElementById('importLevel').addEventListener('click', ()=>{ const text = prompt('Paste level JSON:'); if(text){ try{ const obj = JSON.parse(text); obstacles=obj.obstacles||[]; portals=obj.portals||[]; jumpPads=obj.jumpPads||[]; spikes=obj.spikes||[]; saws=obj.saws||[]; alert('Imported'); }catch(e){ alert('Invalid JSON'); } } });
+
+/* load saved list on startup */
+refreshLevelList();
+
+/* -------------------- Gameplay Input -------------------- */
+document.getElementById('playBtn').addEventListener('click', ()=>{ running = true; if(audio.paused===false) audio.play().catch(()=>{}); });
+document.getElementById('pauseBtn').addEventListener('click', ()=>{ running = false; audio.pause();});
+document.getElementById('resetBtn').addEventListener('click', ()=>{ running=false; resetPlayer(); obstacles=[]; portals=[]; jumpPads=[]; spikes=[]; saws=[]; score=0; frame=0; });
+document.getElementById('modeSelect').addEventListener('change', e => { mode = e.target.value; resetPlayer(); });
+document.getElementById('speedRange').addEventListener('input', e => { baseSpeed = Number(e.target.value); speed = baseSpeed; });
+
+/* Touch controls: tap to jump */
+let lastTap = 0;
+canvas.addEventListener('touchstart', (e)=>{ e.preventDefault(); const t = Date.now(); if(t-lastTap<300){ /* double tap */ } lastTap = t; // trigger same as pointerdown
+  if(!editorMode){ if(mode==='cube'){ if(player.y+player.size>=H-10) player.dy = -24; } else if(mode==='wave'){ wavePressed = true; } else if(mode==='ship'){ shipPressed = true; } }
+}, {passive:false});
+canvas.addEventListener('touchend', (e)=>{ e.preventDefault(); wavePressed=false; shipPressed=false; }, {passive:false});
+
+/* -------------------- Gameplay Flags -------------------- */
+let wavePressed = false;
+let shipPressed = false;
+
+/* -------------------- Utility -------------------- */
+function randomColor(){ const cols = ["#ff6b6b","#feca57","#48dbfb","#1dd1a1","#ff9ff3","#5f27cd"]; return cols[Math.floor(Math.random()*cols.length)]; }
+function rectColl(a,b){ return !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h); }
+
+/* -------------------- Particles -------------------- */
+let particles = [];
+function spawnParticles(x,y,count,col){
+  for(let i=0;i<count;i++){ particles.push({ x:x, y:y, dx:(Math.random()-0.5)*8, dy:(Math.random()-0.9)*6, life:Math.random()*40+30, col:col||'#ff8b8b' }); }
+}
+
+/* -------------------- Rendering helpers -------------------- */
+function drawRoundedRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/* -------------------- Main update/render loop -------------------- */
+function update(){
+  if(!running){ requestAnimationFrame(update); render(); return; }
+  frame++; score++; // advance
+  // beat pulse from audio
+  if(analyser){ analyser.getByteFrequencyData(freqData); const avg = freqData.reduce((s,v)=>s+v,0)/freqData.length; beatPulse = Math.min(1,avg/180); }
+  // spawn objects occasionally
+  if(frame % Math.max(60, 200 - Math.floor(score/200)) === 0){
+    // random spawns if not in editor
+    if(!editorMode){
+      if(Math.random() < 0.6) spawnObstacleRandom();
+      if(Math.random() < 0.05) spawnSpeedPortal(Math.random()<0.5?'fast':'slow');
+      if(Math.random() < 0.06) spawnJumpPad();
+      if(Math.random() < 0.03) spawnSaw();
+      if(Math.random() < 0.04) spawnSpike();
+      if(Math.random() < 0.02) spawnWavePortal();
+    }
+  }
+  // physics
+  if(mode === 'wave'){
+    if(wavePressed) player.dy = -8; else player.dy = 8;
+  } else {
+    // gravity and jump physics
+    player.dy += gravity;
+  }
+  // ship tilt control
+  if(mode === 'ship'){
+    if(shipPressed) player.dy = -6; else player.dy = 6;
+    player.rotation += (shipPressed ? -0.05 : 0.05);
+    if(player.rotation > 0.6) player.rotation = 0.6;
+    if(player.rotation < -0.6) player.rotation = -0.6;
+  } else {
+    player.rotation *= 0.85;
+  }
+  player.y += player.dy;
+  if(player.y + player.size > H - 10){ player.y = H - 10 - player.size; player.dy = 0; player.grounded=true; }
+  if(player.y < 10){ player.y = 10; player.dy = 0; }
+  // trail
+  player.trail.push({ x: player.x, y: player.y, a:1 });
+  if(player.trail.length>18) player.trail.shift();
+
+  // move obstacles/portals/jumpPads/spikes/saws
+  for(let i=obstacles.length-1;i>=0;i--){
+    let o = obstacles[i];
+    o.x -= speed;
+    if(checkCollisionPlayerRect(o)) { hitPlayer(); return; }
+    if(o.x + o.w < -200) obstacles.splice(i,1);
+  }
+  for(let i=portals.length-1;i>=0;i--){
+    let p = portals[i];
+    p.x -= speed;
+    // portal activation rectangle
+    if(player.x < p.x + p.w && player.x + player.size > p.x){
+      if(p.type === 'fast'){ speed = Math.max(4, baseSpeed*1.6); setTimeout(()=>{ speed = baseSpeed; }, 2500); portals.splice(i,1); }
+      else if(p.type === 'slow'){ speed = Math.max(4, baseSpeed*0.6); setTimeout(()=>{ speed = baseSpeed; }, 2500); portals.splice(i,1); }
+      else if(p.type === 'wave'){ mode = (mode==='wave'?'cube':'wave'); document.getElementById('modeSelect').value = mode; portals.splice(i,1); }
+    }
+    if(p.x + p.w < -200) portals.splice(i,1);
+  }
+  for(let i=jumpPads.length-1;i>=0;i--){
+    let j = jumpPads[i];
+    j.x -= speed;
+    if(player.x < j.x + j.w && player.x + player.size > j.x && player.y + player.size > j.y && player.y + player.size < j.y + 50){
+      player.dy = -30; spawnParticles(player.x, player.y, 25, '#7fff7a'); jumpPads.splice(i,1);
+    }
+    if(j.x + j.w < -200) jumpPads.splice(i,1);
+  }
+  for(let i=spikes.length-1;i>=0;i--){
+    let s = spikes[i];
+    s.x -= speed;
+    if(checkCollisionPlayerRect({x:s.x,y:s.y- s.h, w:s.w, h:s.h})){ hitPlayer(); return; }
+    if(s.x + s.w < -200) spikes.splice(i,1);
+  }
+  for(let i=saws.length-1;i>=0;i--){
+    let s = saws[i];
+    s.x -= speed;
+    s.angle += s.speed;
+    // saw collision via circle-rect approx
+    const sawBox = {x:s.x-s.r, y:s.y-s.r, w:s.r*2, h:s.r*2};
+    if(rectCircleColl({x:player.x,y:player.y,w:player.size,h:player.size}, {x:s.x,y:s.y,r:s.r})){ hitPlayer(); return; }
+    if(s.x + s.r < -200) saws.splice(i,1);
+  }
+
+  // particles update
+  for(let i=particles.length-1;i>=0;i--){
+    const p = particles[i];
+    p.x += p.dx; p.y += p.dy; p.life--;
+    p.dy += 0.2;
+    if(p.life<=0) particles.splice(i,1);
+  }
+
+  // increment speed slightly over time if not effected by portal
+  if(frame % 600 === 0) baseSpeed = Math.min(24, baseSpeed + 0.5);
+  speed = Math.max(3, speed * 0.999); // small decay towards base not to runaway
+
+  requestAnimationFrame(update);
+  render();
+}
+
+/* -------------------- helper functions for spawning -------------------- */
+function spawnObstacleRandom(){
+  const h = Math.random() < 0.6 ? (40 + Math.random()*80) : (120 + Math.random()*80);
+  const w = 40 + Math.random()*80;
+  obstacles.push({ x: W + Math.random()*200, y: H - h - 10, w:w, h:h, type:'block', color: randomColor() });
+}
+function spawnSpeedPortal(type){
+  portals.push({ x: W + 60 + Math.random()*200, y: H - 160, w:40, h:120, type:type, color: type==='fast'? '#00ff88' : '#ffaa00' });
+}
+function spawnWavePortal(){ portals.push({ x: W + 60 + Math.random()*200, y: H - 200, w:60, h:120, type:'wave', color:'#00d5ff' }); }
+function spawnJumpPad(){ jumpPads.push({ x: W + 60 + Math.random()*200, y: H - 40, w:70, h:20, color:'#00ff33' }); }
+function spawnSpike(){ spikes.push({ x: W + 60 + Math.random()*200, y: H - 10, w: 50, h:40 }); }
+function spawnSaw(){ saws.push({ x: W + 60 + Math.random()*200, y: H - 140 - Math.random()*120, r: 28 + Math.random()*14, angle:0, speed: (0.08 + Math.random()*0.12) }); }
+
+/* collision checks */
+function checkCollisionPlayerRect(o){
+  return !(player.x + player.size < o.x || player.x > o.x + o.w || player.y + player.size < o.y || player.y > o.y + o.h);
+}
+function rectCircleColl(rect, circle){
+  const distX = Math.abs(circle.x - rect.x - rect.w/2);
+  const distY = Math.abs(circle.y - rect.y - rect.h/2);
+  if(distX > (rect.w/2 + circle.r)) return false;
+  if(distY > (rect.h/2 + circle.r)) return false;
+  if(distX <= (rect.w/2)) return true;
+  if(distY <= (rect.h/2)) return true;
+  const dx = distX - rect.w/2;
+  const dy = distY - rect.h/2;
+  return (dx*dx + dy*dy <= circle.r*circle.r);
+}
+
+/* when player dies */
+function hitPlayer(){
+  spawnParticles(player.x + player.size/2, player.y + player.size/2, 60, '#ff6666');
+  running = false; setTimeout(()=>{ if(confirm('Game Over! Score: '+score+'\nRestart?')){ running=true; resetPlayer(); } }, 200);
+}
+
+/* -------------------- Render -------------------- */
+function render(){
+  // background gradient with beat pulse
+  const pulse = 0.2 + beatPulse*0.9;
+  const grd = ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0, `rgba(${Math.floor(5+50*pulse)}, ${Math.floor(10+80*pulse)}, ${Math.floor(20+120*pulse)}, 1)`);
+  grd.addColorStop(1, '#071022');
+  ctx.fillStyle = grd; ctx.fillRect(0,0,W,H);
+
+  // parallax layers
+  const layers = [
+    { y: H*0.65, h: H*0.35, speed: 0.2, color: '#0f1724' },
+    { y: H*0.75, h: H*0.25, speed: 0.5, color: '#111827' },
+    { y: H*0.85, h: H*0.15, speed: 1.2, color: '#0b1220' }
+  ];
+  layers.forEach((L, idx)=>{
+    ctx.fillStyle = L.color;
+    const tile = 500;
+    const offset = (frame * L.speed) % tile;
+    for(let x=-tile+offset; x < W + tile; x += tile){
+      ctx.fillRect(x, L.y, tile-6, L.h);
+    }
+  });
+
+  // grid faint
+  ctx.globalAlpha = 0.03;
+  for(let x=0;x<W;x+=80){ ctx.fillRect(x, H-220, 1, 220); }
+  ctx.globalAlpha = 1;
+
+  // draw trails behind player
+  for(let i=0;i<player.trail.length;i++){
+    const t = player.trail[i];
+    ctx.fillStyle = `rgba(0,255,200,${t.a})`;
+    const s = player.size * (1 - i/player.trail.length*0.6);
+    ctx.fillRect(t.x, t.y, s, s);
+    t.a -= 0.03;
+  }
+
+  // draw portals
+  portals.forEach(p=>{
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 6 + Math.sin(frame*0.06)*2;
+    ctx.strokeRect(p.x, p.y, p.w, p.h);
+  });
+
+  // draw jumpPads
+  jumpPads.forEach(j=>{
+    ctx.fillStyle = j.color;
+    ctx.fillRect(j.x, j.y, j.w, j.h);
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.fillRect(j.x, j.y-10, j.w, 10 * Math.abs(Math.sin(frame*0.08)));
+  });
+
+  // draw obstacles
+  obstacles.forEach(o=>{
+    ctx.fillStyle = o.color || '#ff5555';
+    ctx.shadowBlur = 20; ctx.shadowColor = o.color || '#ff5555';
+    drawRoundedRect(o.x, o.y, o.w, o.h, 6);
+    ctx.shadowBlur = 0;
+  });
+
+  // draw spikes
+  spikes.forEach(s=>{
+    ctx.fillStyle = '#ffcc00';
+    const spikeW = s.w;
+    const spikeH = s.h;
+    const segments = 3;
+    for(let i=0;i<segments;i++){
+      const sx = s.x + i*(spikeW/segments);
+      ctx.beginPath();
+      ctx.moveTo(sx, s.y);
+      ctx.lineTo(sx + spikeW/segments/2, s.y - spikeH);
+      ctx.lineTo(sx + spikeW/segments, s.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  });
+
+  // draw saws
+  saws.forEach(s=>{
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.angle);
+    ctx.fillStyle = '#cfcfcf';
+    ctx.beginPath(); ctx.arc(0,0,s.r,0,Math.PI*2); ctx.fill();
+    // teeth
+    ctx.fillStyle = '#b23';
+    for(let a=0;a<12;a++){
+      const ang = a*(Math.PI*2/12);
+      ctx.save(); ctx.rotate(ang); ctx.fillRect(s.r-6, -4, 18, 8); ctx.restore();
+    }
+    ctx.restore();
+  });
+
+  // draw player with glow and rotation
+  ctx.save();
+  ctx.translate(player.x + player.size/2, player.y + player.size/2);
+  ctx.rotate(player.rotation);
+  ctx.translate(-(player.x + player.size/2), -(player.y + player.size/2));
+  ctx.shadowBlur = 30; ctx.shadowColor = palette.neonA;
+  ctx.fillStyle = (mode==='wave'? palette.neonB : palette.neonA);
+  ctx.fillRect(player.x, player.y, player.size, player.size);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  // draw particles
+  particles.forEach(p=>{
+    ctx.fillStyle = p.col;
+    ctx.globalAlpha = Math.max(0, p.life/80);
+    ctx.fillRect(p.x, p.y, 6, 6);
+    ctx.globalAlpha = 1;
+  });
+
+  // editor preview
+  if(editorMode && previewRect){
+    ctx.fillStyle = 'rgba(0,255,200,0.12)';
+    ctx.fillRect(previewRect.x, previewRect.y, previewRect.w, previewRect.h);
+    ctx.strokeStyle = 'rgba(0,255,200,0.3)';
+    ctx.strokeRect(previewRect.x, previewRect.y, previewRect.w, previewRect.h);
+  }
+
+  // HUD
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = '20px system-ui';
+  ctx.fillText('Score: ' + score, 24, 34);
+  ctx.fillStyle = 'rgba(200,200,200,0.6)';
+  ctx.font = '14px system-ui';
+  ctx.fillText('Mode:' + mode + '  Speed:' + Math.round(baseSpeed), 24, 56);
+}
+
+/* -------------------- Start loop -------------------- */
+resetPlayer();
+render();
+requestAnimationFrame(update);
+
+/* -------------------- Keyboard gameplay input -------------------- */
+document.addEventListener('keydown', (e)=>{
+  if(e.code === 'Space' && !editorMode){
+    if(mode === 'cube'){ if(player.y + player.size >= H - 10) player.dy = -24; }
+    else if(mode === 'wave'){ wavePressed = true; }
+    else if(mode === 'ship'){ shipPressed = true; }
+    running = true;
+  }
+});
+document.addEventListener('keyup', (e)=>{
+  if(e.code === 'Space'){ wavePressed=false; shipPressed=false; }
+});
+
+/* -------------------- Misc UI functions -------------------- */
+document.getElementById('importLevel').addEventListener('click', ()=>{
+  const j = prompt('Paste level JSON:');
+  if(j) try{ const obj = JSON.parse(j); obstacles=obj.obstacles||[]; portals=obj.portals||[]; jumpPads=obj.jumpPads||[]; spikes=obj.spikes||[]; saws=obj.saws||[]; alert('Imported'); } catch(e){ alert('Invalid JSON'); }
+});
+document.getElementById('loadLevel').addEventListener('click', ()=>{ refreshLevelList(); alert('Saved levels refreshed. Click one on the right to load it.'); });
+
+/* -------------------- End of file -------------------- */
+</script>
+
+</body>
+</html>
