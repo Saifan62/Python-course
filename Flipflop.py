@@ -8,7 +8,7 @@ def palind(r):
         e -= 1
     return True
 
-r= (1,2,3,2,1)
+r= ('s','a','i','f','a','n')
 
 if (palind(r)):
     print(" The tuple is flipflop")
