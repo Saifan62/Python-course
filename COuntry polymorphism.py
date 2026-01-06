@@ -28,3 +28,4 @@ for country in (obj_bd, obj_WI):
     country.Language()
     country.type()
     
+    
