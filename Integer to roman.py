@@ -1,0 +1,35 @@
+class RomanConverter:
+
+    def __init__(self):
+        
+        self.value_map = [
+            (1000, 'M'),
+            (900, 'CM'),
+            (500, 'D'),
+            (400, 'CD'),
+            (100, 'C'),
+            (90, 'XC'),
+            (50, 'L'),
+            (40, 'XL'),
+            (10, 'X'),
+            (9, 'IX'),
+            (5, 'V'),
+            (4, 'IV'),
+            (1, 'I')
+        ]
+
+    def to_numeral(self,number):
+
+        if not(0 < number < 4000):
+            raise ValueError("Number must be between 1 and 3999")
+        
+        result = ""
+        for value, symbol in self.value_map:
+            while number >= value:
+                result += symbol
+                number -= value
+        return result
+
+converter = RomanConverter()
+print(converter.to_numeral(1994))
+print(converter.to_numeral(2025))
