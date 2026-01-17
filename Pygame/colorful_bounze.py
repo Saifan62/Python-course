@@ -91,7 +91,7 @@ while not exit:
             sp1 . change_color()
 
         elif event.type == BACKGROUND_COLOR_CHANGE_EVENT:
-            change_background_color()
+            change_background_color('screen')
 
     all_sprites_list.update()
 

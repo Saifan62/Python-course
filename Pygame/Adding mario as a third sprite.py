@@ -7,7 +7,7 @@ display_surface = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Adding Mario and Luigi as sprites")
 
 background_image = pygame.transform.scale(
-    pygame.image.load('').convert(),
+    pygame.image.load('Background.jpg').convert(),
     (SCREEN_WIDTH, SCREEN_HEIGHT)
 )
 
