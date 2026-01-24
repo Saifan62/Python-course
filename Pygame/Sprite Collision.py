@@ -2,7 +2,7 @@ import pygame
 import random
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 500, 400
-MOVEMENT_SPEED = 20
+MOVEMENT_SPEED = 30
 FONT_SIZE = 72
 
 pygame.init()
